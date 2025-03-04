@@ -1,0 +1,61 @@
+service: patient-doctor-appointment-system
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  environment:
+    NODE_ENV: ${self:provider.stage}
+    DB_HOST: ${ssm:/patient-doctor/${self:provider.stage}/DB_HOST}
+    DB_NAME: ${ssm:/patient-doctor/${self:provider.stage}/DB_NAME}
+    DB_USER: ${ssm:/patient-doctor/${self:provider.stage}/DB_USER}
+    DB_PASSWORD: ${ssm:/patient-doctor/${self:provider.stage}/DB_PASSWORD}
+    JWT_SECRET: ${ssm:/patient-doctor/${self:provider.stage}/JWT_SECRET}
+    GOOGLE_CLIENT_ID: ${ssm:/patient-doctor/${self:provider.stage}/GOOGLE_CLIENT_ID}
+    GOOGLE_CLIENT_SECRET: ${ssm:/patient-doctor/${self:provider.stage}/GOOGLE_CLIENT_SECRET}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - ses:SendEmail
+        - ses:SendRawEmail
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - sqs:SendMessage
+        - sqs:ReceiveMessage
+        - sqs:DeleteMessage
+      Resource: 
+        - !GetAtt NotificationQueue.Arn
+
+functions:
+  api:
+    handler: dist/handler.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+  processNotifications:
+    handler: dist/handlers/notification.handler
+    events:
+      - sqs:
+          arn: !GetAtt NotificationQueue.Arn
+
+resources:
+  Resources:
+    NotificationQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-notifications
+
+plugins:
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+custom:
+  serverless-offline:
+    httpPort: 4000
+  dotenv:
+    path: .env.${self:provider.stage} 

@@ -1,0 +1,97 @@
+image: node:18
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  AWS_DEFAULT_REGION: us-east-1
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+
+services:
+  - docker:dind
+  - postgres:15-alpine
+
+# Configure test database
+before_script:
+  - apt-get update && apt-get install -y postgresql-client
+  - export PGPASSWORD=$DB_PASSWORD
+  - psql -h postgres -U postgres -c "CREATE DATABASE patient_doctor_test_db;"
+
+cache:
+  paths:
+    - node_modules/
+
+# Test stage
+test:
+  stage: test
+  variables:
+    DB_HOST: postgres
+    DB_NAME: patient_doctor_test_db
+    DB_USER: postgres
+    DB_PASSWORD: postgres
+    NODE_ENV: test
+  script:
+    - npm ci
+    - npm run lint
+    - npm run test
+  coverage: /All files[^|]*\|[^|]*\s+([\d\.]+)/
+  artifacts:
+    reports:
+      coverage: coverage/lcov-report/index.html
+
+# Build stage
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+  only:
+    - dev
+    - test
+    - main
+
+# Deploy to development
+deploy_dev:
+  stage: deploy
+  script:
+    - npm install -g serverless
+    - serverless config credentials --provider aws --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY
+    - serverless deploy --stage dev
+  environment:
+    name: development
+    url: https://api-dev.your-domain.com
+  only:
+    - dev
+
+# Deploy to test
+deploy_test:
+  stage: deploy
+  script:
+    - npm install -g serverless
+    - serverless config credentials --provider aws --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY
+    - serverless deploy --stage test
+  environment:
+    name: test
+    url: https://api-test.your-domain.com
+  only:
+    - test
+
+# Deploy to production
+deploy_prod:
+  stage: deploy
+  script:
+    - npm install -g serverless
+    - serverless config credentials --provider aws --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY
+    - serverless deploy --stage prod
+  environment:
+    name: production
+    url: https://api.your-domain.com
+  only:
+    - main
+  when: manual 
